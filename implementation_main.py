@@ -228,6 +228,7 @@ class RiskAssessmentAgent:
 
         monthly_income = applicant.annual_income / 12
 
+        # Calculate individual dimension scores (higher = better/safer)
         liquidity_score = self._calculate_liquidity_risk(applicant, loan)
         leverage_score = self._calculate_leverage_risk(applicant, loan)
         income_stability_score = self._calculate_income_stability_risk(applicant)
@@ -237,16 +238,25 @@ class RiskAssessmentAgent:
         market_score = self._calculate_market_risk(applicant, loan, monthly_income)
         stress_test_score = self._calculate_stress_test_risk(applicant, loan, monthly_income)
 
-        # Weighted composite risk (lower = safer)
-        composite_risk = (liquidity_score * 0.15 + leverage_score * 0.15 +
-                         income_stability_score * 0.15 + purpose_score * 0.10 +
-                         geographic_score * 0.05 + behavioral_score * 0.15 +
-                         market_score * 0.10 + stress_test_score * 0.15)
+        # Convert all risk scores to approval scores (100-risk for consistency)
+        # This ensures higher scores = safer/better profiles
+        liquidity_approval = 100 - min(100, liquidity_score)
+        leverage_approval = 100 - min(100, leverage_score)
+        income_approval = 100 - min(100, income_stability_score)
+        purpose_approval = 100 - min(100, purpose_score)
+        geographic_approval = 100 - min(100, geographic_score)
+        behavioral_approval = 100 - min(100, behavioral_score)
+        market_approval = 100 - min(100, market_score)
+        stress_approval = 100 - min(100, stress_test_score)
 
-        # Convert to score (100 = safe, 0 = risky)
-        risk_score = 100 - min(100, composite_risk)
+        # Weighted composite approval score (higher = safer)
+        risk_score = (liquidity_approval * 0.15 + leverage_approval * 0.15 +
+                     income_approval * 0.15 + purpose_approval * 0.10 +
+                     geographic_approval * 0.05 + behavioral_approval * 0.15 +
+                     market_approval * 0.10 + stress_approval * 0.15)
 
         # Generate risk flags
+        composite_risk = 100 - risk_score  # Convert back for flag logic
         risk_flags = self._generate_risk_flags(
             applicant, loan, liquidity_score, leverage_score, behavioral_score,
             market_score, stress_test_score, composite_risk
@@ -294,74 +304,87 @@ class RiskAssessmentAgent:
         estimated_liquid_assets = applicant.total_assets * 0.3
         liquid_ratio = estimated_liquid_assets / max(1, loan.amount)
 
-        if liquid_ratio >= 0.8:
+        # More lenient - emergency fund not required for most home loans
+        if liquid_ratio >= 0.3:
+            return 3
+        elif liquid_ratio >= 0.15:
             return 10
-        elif liquid_ratio >= 0.6:
+        elif liquid_ratio >= 0.05:
             return 20
-        elif liquid_ratio >= 0.4:
-            return 40
         else:
-            return 70
+            return 40
 
     def _calculate_leverage_risk(self, applicant: Applicant, loan: LoanDetails) -> float:
         net_worth = applicant.total_assets - applicant.existing_liabilities
         total_debt_after = applicant.existing_liabilities + loan.amount
         leverage_ratio = total_debt_after / max(1, applicant.total_assets)
 
-        if leverage_ratio < 0.5:
-            return 10
-        elif leverage_ratio < 1.0:
+        # Home loans typically allow 2-4x leverage ratios
+        if leverage_ratio < 1.5:
+            return 2
+        elif leverage_ratio < 2.0:
+            return 8
+        elif leverage_ratio < 2.5:
+            return 15
+        elif leverage_ratio < 3.0:
             return 25
-        elif leverage_ratio < 1.5:
+        elif leverage_ratio < 3.5:
+            return 35
+        elif leverage_ratio < 4.0:
             return 45
         else:
-            return 75
+            return 60
 
     def _calculate_income_stability_risk(self, applicant: Applicant) -> float:
         employment_type_score = 100 if "employed" in applicant.employment_type.lower() else 70
 
+        # More reasonable tenure scoring
         if applicant.employment_years >= 10:
-            tenure_score = 20
+            tenure_score = 5
         elif applicant.employment_years >= 5:
-            tenure_score = 40
+            tenure_score = 15
         elif applicant.employment_years >= 2:
-            tenure_score = 60
+            tenure_score = 30
         else:
-            tenure_score = 80
+            tenure_score = 60
 
         return tenure_score * 0.6 + (100 - employment_type_score) * 0.4
 
     def _calculate_purpose_based_risk(self, loan: LoanDetails) -> float:
         purpose = loan.purpose.lower()
+        # Home loans are lowest risk (backed by property)
         risk_scores = {
-            "home": 20, "auto": 40, "education": 50,
-            "personal": 70, "business": 60
+            "home": 5, "auto": 20, "education": 25,
+            "personal": 50, "business": 40
         }
-        return risk_scores.get(purpose, 65)
+        return risk_scores.get(purpose, 45)
 
     def _calculate_geographic_risk(self, applicant: Applicant) -> float:
         location = applicant.location.lower()
         if any(city in location for city in ["mumbai", "bangalore", "delhi", "ncr", "hyderabad"]):
-            return 20
+            return 5
         elif any(city in location for city in ["pune", "ahmedabad", "kolkata", "jaipur"]):
-            return 40
+            return 15
         elif "rural" in location:
-            return 80
-        else:
             return 50
+        else:
+            return 25
 
     def _calculate_behavioral_risk(self, applicant: Applicant) -> float:
-        base_score = 20
+        # Start with clean slate
+        base_score = 5
 
         if applicant.payment_defaults == 0:
             default_penalty = 0
         elif applicant.payment_defaults == 1:
-            default_penalty = 30
+            default_penalty = 20
+        elif applicant.payment_defaults == 2:
+            default_penalty = 40
         else:
             default_penalty = 60
 
-        bankruptcy_penalty = 50 if applicant.bankruptcy_history else 0
-        kyc_penalty = 40 if not applicant.kyc_verified else 0
+        bankruptcy_penalty = 45 if applicant.bankruptcy_history else 0
+        kyc_penalty = 30 if not applicant.kyc_verified else 0
 
         return min(100, base_score + default_penalty + bankruptcy_penalty + kyc_penalty)
 
@@ -373,12 +396,15 @@ class RiskAssessmentAgent:
         current_dti = (total_monthly_obligation / monthly_income * 100) if monthly_income > 0 else 100
         stress_dti = (total_monthly_obligation * 1.02 / monthly_income * 100) if monthly_income > 0 else 100
 
-        if stress_dti < 40:
-            return 10
-        elif stress_dti < 55:
-            return 35
-        elif stress_dti < 70:
-            return 60
+        # More reasonable DTI thresholds (RBI typically uses 50-60% as maximum)
+        if stress_dti < 35:
+            return 5
+        elif stress_dti < 50:
+            return 20
+        elif stress_dti < 65:
+            return 40
+        elif stress_dti < 80:
+            return 65
         else:
             return 85
 
@@ -391,22 +417,23 @@ class RiskAssessmentAgent:
 
         stress_emi = loan.amount / loan.tenure_months * (1 + stress_rate / 100 / 12)
 
-        scenario_1 = (stress_expense + stress_emi) / stress_income < 0.5
-        scenario_2 = (applicant.existing_liabilities / 12 + stress_emi) / monthly_income < 0.6
-        scenario_3 = (applicant.total_assets - loan.amount) > loan.amount
+        # More reasonable stress test criteria
+        scenario_1 = (stress_expense + stress_emi) / stress_income < 0.60
+        scenario_2 = (applicant.existing_liabilities / 12 + stress_emi) / monthly_income < 0.70
+        scenario_3 = (applicant.total_assets - loan.amount) > 0
 
         passes += 1 if scenario_1 else 0
         passes += 1 if scenario_2 else 0
         passes += 1 if scenario_3 else 0
 
         if passes == 3:
-            return 15
+            return 5
         elif passes == 2:
-            return 40
+            return 20
         elif passes == 1:
-            return 65
+            return 45
         else:
-            return 90
+            return 75
 
     def _generate_risk_flags(self, applicant: Applicant, loan: LoanDetails,
                             liquidity_score: float, leverage_score: float,

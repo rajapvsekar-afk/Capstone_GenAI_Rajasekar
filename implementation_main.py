@@ -198,104 +198,292 @@ class CreditAnalysisAgent:
         )
 
 class RiskAssessmentAgent:
-    """Agent 3: Financial Risk Assessment (30% weight)"""
+    """Agent 3: Enhanced Financial Risk Assessment (30% weight)
+
+    8-Dimensional Risk Analysis:
+    - Liquidity Risk (15%): Emergency fund availability
+    - Leverage Risk (15%): Debt-to-equity ratio
+    - Income Stability Risk (15%): Employment consistency
+    - Purpose-Based Risk (10%): Loan type risk profile
+    - Geographic Risk (5%): Location economic stability
+    - Behavioral Risk (15%): Payment history & compliance
+    - Market Risk (10%): Interest rate impact
+    - Stress Test Risk (15%): Adverse scenario survivability
+    """
 
     def __init__(self):
         self.name = "Risk Assessment Agent"
         self.weight = 0.30
         self.agent_id = str(uuid.uuid4())[:8]
+        self.sector_risk_map = {
+            "it": 25, "healthcare": 30, "finance": 35, "manufacturing": 45,
+            "retail": 50, "agriculture": 60, "hospitality": 70, "startup": 80
+        }
+        self.location_tier_risk = {
+            "tier-1": 20, "tier-2": 40, "tier-3": 60, "rural": 80
+        }
 
     async def analyze(self, applicant: Applicant, loan: LoanDetails) -> AgentResult:
         start_time = time.time()
 
-        # Calculate monthly income
         monthly_income = applicant.annual_income / 12
 
-        # Calculate DTI (Debt-to-Income) ratio
-        monthly_obligations = applicant.existing_liabilities / 12
-        dti_ratio = (monthly_obligations / monthly_income * 100) if monthly_income > 0 else 0
+        liquidity_score = self._calculate_liquidity_risk(applicant, loan)
+        leverage_score = self._calculate_leverage_risk(applicant, loan)
+        income_stability_score = self._calculate_income_stability_risk(applicant)
+        purpose_score = self._calculate_purpose_based_risk(loan)
+        geographic_score = self._calculate_geographic_risk(applicant)
+        behavioral_score = self._calculate_behavioral_risk(applicant)
+        market_score = self._calculate_market_risk(applicant, loan, monthly_income)
+        stress_test_score = self._calculate_stress_test_risk(applicant, loan, monthly_income)
 
-        # DTI scoring (25%)
-        if dti_ratio < 20:
-            dti_score = 100
-        elif dti_ratio < 35:
-            dti_score = 85
-        elif dti_ratio < 50:
-            dti_score = 60
-        else:
-            dti_score = 20
+        # Weighted composite risk (lower = safer)
+        composite_risk = (liquidity_score * 0.15 + leverage_score * 0.15 +
+                         income_stability_score * 0.15 + purpose_score * 0.10 +
+                         geographic_score * 0.05 + behavioral_score * 0.15 +
+                         market_score * 0.10 + stress_test_score * 0.15)
 
-        # LTV (Loan-to-Value) ratio
-        ltv_ratio = (loan.amount / applicant.total_assets * 100) if applicant.total_assets > 0 else 100
+        # Convert to score (100 = safe, 0 = risky)
+        risk_score = 100 - min(100, composite_risk)
 
-        # LTV scoring (20%)
-        if ltv_ratio < 60:
-            ltv_score = 100
-        elif ltv_ratio < 75:
-            ltv_score = 85
-        elif ltv_ratio < 85:
-            ltv_score = 60
-        else:
-            ltv_score = 30
+        # Generate risk flags
+        risk_flags = self._generate_risk_flags(
+            applicant, loan, liquidity_score, leverage_score, behavioral_score,
+            market_score, stress_test_score, composite_risk
+        )
 
-        # Employment stability (20%)
-        if applicant.employment_years >= 10:
-            employment_score = 95
-        elif applicant.employment_years >= 5:
-            employment_score = 75
-        elif applicant.employment_years >= 2:
-            employment_score = 60
-        else:
-            employment_score = 40
+        # Estimate mitigations
+        mitigations = self._estimate_risk_mitigations(
+            applicant, loan, composite_risk, behavioral_score
+        )
 
-        # Income adequacy (20%)
-        if monthly_income > loan.amount / (loan.tenure_months * 20):
-            income_score = 100
-        elif monthly_income > loan.amount / (loan.tenure_months * 30):
-            income_score = 80
-        else:
-            income_score = 50
-
-        # Asset coverage (15%)
-        if applicant.total_assets >= loan.amount * 2:
-            asset_score = 100
-        elif applicant.total_assets >= loan.amount * 1.5:
-            asset_score = 85
-        elif applicant.total_assets >= loan.amount:
-            asset_score = 60
-        else:
-            asset_score = 40
-
-        # Weighted score
-        final_score = (dti_score * 0.25 +
-                      ltv_score * 0.20 +
-                      employment_score * 0.20 +
-                      income_score * 0.20 +
-                      asset_score * 0.15)
+        # Confidence scoring
+        confidence = 0.92 if applicant.kyc_verified else 0.80
 
         processing_time = (time.time() - start_time) * 1000
 
         return AgentResult(
             agent_name=self.name,
-            score=min(100, final_score),
-            confidence=0.85,
+            score=risk_score,
+            confidence=confidence,
             status=AgentStatus.COMPLETED,
             findings={
-                "dti_ratio": round(dti_ratio, 2),
-                "ltv_ratio": round(ltv_ratio, 2),
+                "risk_metrics": {
+                    "liquidity_risk": round(liquidity_score, 1),
+                    "leverage_risk": round(leverage_score, 1),
+                    "income_stability_risk": round(income_stability_score, 1),
+                    "purpose_based_risk": round(purpose_score, 1),
+                    "geographic_risk": round(geographic_score, 1),
+                    "behavioral_risk": round(behavioral_score, 1),
+                    "market_risk": round(market_score, 1),
+                    "stress_test_risk": round(stress_test_score, 1),
+                },
+                "composite_risk": round(composite_risk, 1),
+                "dti_ratio": round((applicant.existing_liabilities / (monthly_income * 12) * 100) if monthly_income > 0 else 0, 2),
+                "leverage_ratio": round(applicant.existing_liabilities / max(1, applicant.total_assets - applicant.existing_liabilities), 2),
                 "monthly_income": round(monthly_income, 2),
                 "employment_years": applicant.employment_years,
                 "total_assets": applicant.total_assets,
-                "score_breakdown": {
-                    "dti_score": dti_score,
-                    "ltv_score": ltv_score,
-                    "employment_score": employment_score,
-                    "income_score": income_score,
-                    "asset_score": asset_score
-                }
+                "risk_flags": risk_flags,
+                "mitigations": mitigations
             },
             processing_time_ms=processing_time
         )
+
+    def _calculate_liquidity_risk(self, applicant: Applicant, loan: LoanDetails) -> float:
+        estimated_liquid_assets = applicant.total_assets * 0.3
+        liquid_ratio = estimated_liquid_assets / max(1, loan.amount)
+
+        if liquid_ratio >= 0.8:
+            return 10
+        elif liquid_ratio >= 0.6:
+            return 20
+        elif liquid_ratio >= 0.4:
+            return 40
+        else:
+            return 70
+
+    def _calculate_leverage_risk(self, applicant: Applicant, loan: LoanDetails) -> float:
+        net_worth = applicant.total_assets - applicant.existing_liabilities
+        total_debt_after = applicant.existing_liabilities + loan.amount
+        leverage_ratio = total_debt_after / max(1, applicant.total_assets)
+
+        if leverage_ratio < 0.5:
+            return 10
+        elif leverage_ratio < 1.0:
+            return 25
+        elif leverage_ratio < 1.5:
+            return 45
+        else:
+            return 75
+
+    def _calculate_income_stability_risk(self, applicant: Applicant) -> float:
+        employment_type_score = 100 if "employed" in applicant.employment_type.lower() else 70
+
+        if applicant.employment_years >= 10:
+            tenure_score = 20
+        elif applicant.employment_years >= 5:
+            tenure_score = 40
+        elif applicant.employment_years >= 2:
+            tenure_score = 60
+        else:
+            tenure_score = 80
+
+        return tenure_score * 0.6 + (100 - employment_type_score) * 0.4
+
+    def _calculate_purpose_based_risk(self, loan: LoanDetails) -> float:
+        purpose = loan.purpose.lower()
+        risk_scores = {
+            "home": 20, "auto": 40, "education": 50,
+            "personal": 70, "business": 60
+        }
+        return risk_scores.get(purpose, 65)
+
+    def _calculate_geographic_risk(self, applicant: Applicant) -> float:
+        location = applicant.location.lower()
+        if any(city in location for city in ["mumbai", "bangalore", "delhi", "ncr", "hyderabad"]):
+            return 20
+        elif any(city in location for city in ["pune", "ahmedabad", "kolkata", "jaipur"]):
+            return 40
+        elif "rural" in location:
+            return 80
+        else:
+            return 50
+
+    def _calculate_behavioral_risk(self, applicant: Applicant) -> float:
+        base_score = 20
+
+        if applicant.payment_defaults == 0:
+            default_penalty = 0
+        elif applicant.payment_defaults == 1:
+            default_penalty = 30
+        else:
+            default_penalty = 60
+
+        bankruptcy_penalty = 50 if applicant.bankruptcy_history else 0
+        kyc_penalty = 40 if not applicant.kyc_verified else 0
+
+        return min(100, base_score + default_penalty + bankruptcy_penalty + kyc_penalty)
+
+    def _calculate_market_risk(self, applicant: Applicant, loan: LoanDetails, monthly_income: float) -> float:
+        monthly_obligations = applicant.existing_liabilities / 12
+        estimated_emi = loan.amount / loan.tenure_months
+        total_monthly_obligation = monthly_obligations + estimated_emi
+
+        current_dti = (total_monthly_obligation / monthly_income * 100) if monthly_income > 0 else 100
+        stress_dti = (total_monthly_obligation * 1.02 / monthly_income * 100) if monthly_income > 0 else 100
+
+        if stress_dti < 40:
+            return 10
+        elif stress_dti < 55:
+            return 35
+        elif stress_dti < 70:
+            return 60
+        else:
+            return 85
+
+    def _calculate_stress_test_risk(self, applicant: Applicant, loan: LoanDetails, monthly_income: float) -> float:
+        passes = 0
+
+        stress_income = monthly_income * 0.85
+        stress_rate = 2.0
+        stress_expense = applicant.existing_liabilities * 1.1 / 12
+
+        stress_emi = loan.amount / loan.tenure_months * (1 + stress_rate / 100 / 12)
+
+        scenario_1 = (stress_expense + stress_emi) / stress_income < 0.5
+        scenario_2 = (applicant.existing_liabilities / 12 + stress_emi) / monthly_income < 0.6
+        scenario_3 = (applicant.total_assets - loan.amount) > loan.amount
+
+        passes += 1 if scenario_1 else 0
+        passes += 1 if scenario_2 else 0
+        passes += 1 if scenario_3 else 0
+
+        if passes == 3:
+            return 15
+        elif passes == 2:
+            return 40
+        elif passes == 1:
+            return 65
+        else:
+            return 90
+
+    def _generate_risk_flags(self, applicant: Applicant, loan: LoanDetails,
+                            liquidity_score: float, leverage_score: float,
+                            behavioral_score: float, market_score: float,
+                            stress_score: float, composite_risk: float) -> List[Dict]:
+        flags = []
+
+        monthly_income = applicant.annual_income / 12
+        monthly_obligations = applicant.existing_liabilities / 12
+        dti = (monthly_obligations / monthly_income * 100) if monthly_income > 0 else 0
+
+        # RED FLAGS
+        if dti > 60:
+            flags.append({"type": "RED", "reason": "DTI exceeds 60%", "severity": "critical"})
+        if applicant.payment_defaults >= 3:
+            flags.append({"type": "RED", "reason": "3+ payment defaults", "severity": "critical"})
+        if applicant.bankruptcy_history:
+            flags.append({"type": "RED", "reason": "Bankruptcy history", "severity": "critical"})
+        if applicant.employment_years < 1:
+            flags.append({"type": "RED", "reason": "Employment < 1 year", "severity": "critical"})
+        if stress_score > 70:
+            flags.append({"type": "RED", "reason": "Fails stress test scenarios", "severity": "high"})
+        if leverage_score > 70:
+            flags.append({"type": "RED", "reason": "High leverage ratio", "severity": "high"})
+        if liquidity_score > 65:
+            flags.append({"type": "RED", "reason": "Low liquid assets", "severity": "high"})
+
+        # YELLOW FLAGS
+        elif dti > 40:
+            flags.append({"type": "YELLOW", "reason": "DTI between 40-60%", "severity": "medium"})
+        if applicant.payment_defaults >= 1:
+            flags.append({"type": "YELLOW", "reason": "Payment defaults on record", "severity": "medium"})
+        if applicant.employment_years < 5:
+            flags.append({"type": "YELLOW", "reason": "Employment < 5 years", "severity": "medium"})
+        if loan.amount > applicant.annual_income * 3:
+            flags.append({"type": "YELLOW", "reason": "Loan > 3x annual income", "severity": "medium"})
+        if stress_score > 40:
+            flags.append({"type": "YELLOW", "reason": "Marginal stress test results", "severity": "medium"})
+        if not applicant.kyc_verified:
+            flags.append({"type": "YELLOW", "reason": "KYC not verified", "severity": "medium"})
+
+        # GREEN FLAGS
+        if liquidity_score < 25:
+            flags.append({"type": "GREEN", "reason": "Strong liquidity position", "severity": "positive"})
+        if applicant.payment_defaults == 0 and applicant.bankruptcy_history == False:
+            flags.append({"type": "GREEN", "reason": "Clean payment history", "severity": "positive"})
+        if applicant.employment_years >= 10:
+            flags.append({"type": "GREEN", "reason": "Excellent employment stability", "severity": "positive"})
+        if stress_score < 30:
+            flags.append({"type": "GREEN", "reason": "Passes all stress tests", "severity": "positive"})
+
+        return flags if flags else [{"type": "INFO", "reason": "Standard risk profile", "severity": "neutral"}]
+
+    def _estimate_risk_mitigations(self, applicant: Applicant, loan: LoanDetails,
+                                   composite_risk: float, behavioral_score: float) -> List[str]:
+        mitigations = []
+
+        if composite_risk > 60:
+            mitigations.append("Require collateral or guarantee for loan securing")
+            mitigations.append("Reduce approved loan amount by 20-30%")
+            mitigations.append("Mandate monthly payment reviews for first 6 months")
+            mitigations.append("Higher interest rate premium (+0.5-1.0%)")
+        elif composite_risk > 40:
+            mitigations.append("Require personal guarantee from co-applicant")
+            mitigations.append("Mandate quarterly compliance reviews")
+            mitigations.append("Interest rate premium (+0.25-0.5%)")
+        else:
+            mitigations.append("Standard approval conditions apply")
+
+        if behavioral_score > 50:
+            mitigations.append("Require salary account with RS Bank")
+            mitigations.append("Weekly transaction monitoring enabled")
+
+        if applicant.employment_years < 2:
+            mitigations.append("Reduce tenure or increase EMI frequency")
+
+        return mitigations
 
 class ComplianceAgent:
     """Agent 4: Regulatory Compliance (25% weight)"""

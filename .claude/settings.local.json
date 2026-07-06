@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/ubuntu/**)",
+      "Bash(tar -czf rs_bank_loan_approval_system.tar.gz rs_bank_agentic_loan_platform/)",
+      "Bash(git init *)",
+      "Bash(git config *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git branch *)"
+    ]
+  }
+}
